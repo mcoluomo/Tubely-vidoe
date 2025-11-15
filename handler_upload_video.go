@@ -96,13 +96,19 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	videoAspRatio, err := getVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+	log.Println("aspect ratio", videoAspRatio)
+
 	log.Printf("written bytes: %d", writtenBytes)
 	if _, err = tempFile.Seek(0, io.SeekStart); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to rewind file", err)
 		return
 	}
-	err = cfg.db.UpdateVideo(video)
-	if err != nil {
+	if err = cfg.db.UpdateVideo(video); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
 		return
 	}
@@ -111,8 +117,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		panic(err)
 	}
 
-	key := hexKey + fileExt[3]
-	log.Print(key)
+	key := videoAspRatio + hexKey + fileExt[3]
+	log.Println(key)
 
 	putObjectOutput, err := cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
@@ -125,7 +131,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	log.Printf("Successfully uploaded video. ETag: %s", *putObjectOutput.ETag)
+	log.Printf("Successfully uploaded video. ETag: %s\n", *putObjectOutput.ETag)
 
 	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, key)
 
@@ -135,6 +141,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	log.Printf("Successfully uploaded video %s to Bucket %s", video.ID, cfg.s3Bucket)
+	log.Printf("Successfully uploaded video %s to Bucket %s\n", video.ID, cfg.s3Bucket)
 	respondWithJSON(w, http.StatusOK, video)
 }

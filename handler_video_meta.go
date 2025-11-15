@@ -1,8 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"os/exec"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
@@ -117,4 +123,64 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 	}
 
 	respondWithJSON(w, http.StatusOK, videos)
+}
+
+func getGreatestCommonDivisor(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	var bytesBuf bytes.Buffer
+	args := []string{"-v", "error", "-print_format", "json", "-show_streams", filePath}
+	var cmd *exec.Cmd = exec.Command("ffprobe", args...)
+	cmd.Stdout = &bytesBuf
+
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed running ffprobe command: %w", err)
+	}
+	var ffprobeOutput struct {
+		Streams []struct {
+			Width              int    `json:"width"`
+			Height             int    `json:"height"`
+			CodecType          string `json:"codec_type"`
+			DisplayAspectRatio string `json:"display_aspect_ratio"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(bytesBuf.Bytes(), &ffprobeOutput); err != nil {
+		return "", fmt.Errorf("failed unmarshelling json data: %w", err)
+	}
+	if len(ffprobeOutput.Streams) == 0 {
+		return "", errors.New("no video streams found")
+	}
+
+	if ffprobeOutput.Streams[0].CodecType != "video" {
+		return "", fmt.Errorf("ERR: codec type is not video: %s", ffprobeOutput.Streams[0].CodecType)
+	}
+
+	var ratio string
+
+	width := ffprobeOutput.Streams[0].Width
+	height := ffprobeOutput.Streams[0].Height
+
+	if width == 16*height/9 {
+		ratio = "16:9"
+	} else if height == 16*width/9 {
+		ratio = "9:16"
+	}
+
+	log.Println(ratio)
+	switch ratio {
+	case "9:16":
+		return "portrait/", nil
+
+	case "16:9":
+		return "landscape/", nil
+	}
+
+	return "other/", nil
 }
