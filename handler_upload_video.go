@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -90,6 +94,9 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Failed to rewind file", err)
 		return
 	}
+
+	processVideoForFastStart(tempFile.Name())
+
 	writtenBytes, err := io.Copy(tempFile, file)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
@@ -143,4 +150,57 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("Successfully uploaded video %s to Bucket %s\n", video.ID, cfg.s3Bucket)
 	respondWithJSON(w, http.StatusOK, video)
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	var bytesBuf bytes.Buffer
+	args := []string{"-v", "error", "-print_format", "json", "-show_streams", filePath}
+	var cmd *exec.Cmd = exec.Command("ffprobe", args...)
+	cmd.Stdout = &bytesBuf
+
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed running ffprobe command: %w", err)
+	}
+	var ffprobeOutput struct {
+		Streams []struct {
+			Width              int    `json:"width"`
+			Height             int    `json:"height"`
+			CodecType          string `json:"codec_type"`
+			DisplayAspectRatio string `json:"display_aspect_ratio"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(bytesBuf.Bytes(), &ffprobeOutput); err != nil {
+		return "", fmt.Errorf("failed unmarshelling json data: %w", err)
+	}
+	if len(ffprobeOutput.Streams) == 0 {
+		return "", errors.New("no video streams found")
+	}
+
+	if ffprobeOutput.Streams[0].CodecType != "video" {
+		return "", fmt.Errorf("ERR: codec type is not video: %s", ffprobeOutput.Streams[0].CodecType)
+	}
+
+	var ratio string
+
+	width := ffprobeOutput.Streams[0].Width
+	height := ffprobeOutput.Streams[0].Height
+
+	if width == 16*height/9 {
+		ratio = "16:9"
+	} else if height == 16*width/9 {
+		ratio = "9:16"
+	}
+
+	log.Println(ratio)
+	switch ratio {
+	case "9:16":
+		return "portrait/", nil
+
+	case "16:9":
+		return "landscape/", nil
+	}
+
+	return "other/", nil
 }
