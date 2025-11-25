@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
@@ -120,5 +124,18 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 }
 
 func processVideoForFastStart(filePath string) (string, error) {
-	return "", nil
+	processedFilePath := filePath + ".processing"
+
+	var bytesBuf bytes.Buffer
+	args := []string{"-i", "-c", "copy", "-movflags", "faststart", "-f", "mp4", filePath}
+	var cmd *exec.Cmd = exec.Command("ffmpeg", args...)
+	cmd.Stdout = &bytesBuf
+
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed running ffmpeg command: %w", err)
+	}
+
+	return bytesBuf.String(), nil
 }
