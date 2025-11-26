@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -126,10 +126,10 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 func processVideoForFastStart(filePath string) (string, error) {
 	processedFilePath := filePath + ".processing"
 
-	var bytesBuf bytes.Buffer
-	args := []string{"-i", "-c", "copy", "-movflags", "faststart", "-f", "mp4", filePath}
+	log.Printf("Starting ffmpeg processing: input=%s, output=%s", filePath, processedFilePath)
+
+	args := []string{"-i", filePath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", processedFilePath}
 	var cmd *exec.Cmd = exec.Command("ffmpeg", args...)
-	cmd.Stdout = &bytesBuf
 
 	cmd.Stderr = os.Stderr
 
@@ -137,5 +137,7 @@ func processVideoForFastStart(filePath string) (string, error) {
 		return "", fmt.Errorf("failed running ffmpeg command: %w", err)
 	}
 
-	return bytesBuf.String(), nil
+	log.Printf("ffmpeg processing complete: %s", processedFilePath)
+
+	return processedFilePath, nil
 }

@@ -95,8 +95,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	processVideoForFastStart(tempFile.Name())
-
 	writtenBytes, err := io.Copy(tempFile, file)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
@@ -115,13 +113,30 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Failed to rewind file", err)
 		return
 	}
+
+	processedFilePath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed opening file: %s", processedFilePath)
+		respondWithError(w, http.StatusInternalServerError, errMsg, err)
+		return
+	}
+	defer processedFile.Close()
+	defer os.Remove(processedFilePath)
+
 	if err = cfg.db.UpdateVideo(video); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
 		return
 	}
 	hexKey, err := generateRandomKey()
 	if err != nil {
-		panic(err)
+		respondWithError(w, http.StatusInternalServerError, "failded generating key", err)
+		return
 	}
 
 	key := videoAspRatio + hexKey + fileExt[3]
@@ -130,7 +145,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	putObjectOutput, err := cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &key,
-		Body:        tempFile,
+		Body:        processedFile,
 		ContentType: &contentType,
 	})
 	if err != nil {
