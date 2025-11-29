@@ -12,9 +12,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
 
@@ -149,13 +152,13 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		ContentType: &contentType,
 	})
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to upload video to S3", err)
+		respondWithError(w, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
 	log.Printf("Successfully uploaded video. ETag: %s\n", *putObjectOutput.ETag)
 
-	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, key)
+	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, key)
 
 	video.VideoURL = &videoURL
 	if err = cfg.db.UpdateVideo(video); err != nil {
@@ -218,4 +221,31 @@ func getVideoAspectRatio(filePath string) (string, error) {
 	}
 
 	return "other/", nil
+}
+
+func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+	var presignClient *s3.PresignClient = s3.NewPresignClient(s3Client)
+	params := &s3.GetObjectInput{Key: &key, Bucket: &bucket}
+
+	presignReq, err := presignClient.PresignGetObject(context.Background(), params, s3.WithPresignExpires(expireTime))
+	if err != nil {
+		return "", fmt.Errorf("generatePresignedURL failed fetching presigned http request")
+	}
+
+	return presignReq.URL, nil
+}
+
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+	splitVideoUrl := strings.Split(*video.VideoURL, ",")
+	presignedUrl, err := generatePresignedURL(cfg.s3Client, splitVideoUrl[0], splitVideoUrl[1], //missing field)
+	if err != nil {
+		return database.Video{}, err
+	}
+	videoURL := presignedUrl
+
+	video.VideoURL = &videoURL
+	if err = cfg.db.UpdateVideo(video); err != nil {
+		return database.Video{}, fmt.Errorf("failed updating video metadata")
+	}
+	return database.Video{}, nil
 }
