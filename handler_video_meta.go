@@ -99,7 +99,13 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, video)
+	newVideo, err := cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error(), err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, newVideo)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -119,8 +125,18 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve videos", err)
 		return
 	}
+	newVideos := make([]database.Video, len(videos))
+	for idx, video := range videos {
+		newVideo, err := cfg.dbVideoToSignedVideo(video)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, err.Error(), err)
+			return
+		}
+		newVideos[idx] = newVideo
 
-	respondWithJSON(w, http.StatusOK, videos)
+	}
+
+	respondWithJSON(w, http.StatusOK, newVideos)
 }
 
 func processVideoForFastStart(filePath string) (string, error) {
